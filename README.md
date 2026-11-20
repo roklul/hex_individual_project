@@ -4,7 +4,7 @@
 
 - **線上 API Base URL**：`https://<your-api>.onrender.com/api`（部署後填入）
 - **前端網站**：`https://<your-web>.vercel.app`（部署後填入）
-- **前端 Repo**：`https://github.com/<you>/hex_individual_project_web`
+- **前端 Repo**：`https://github.com/roklul/hex_individual_project_web`
 
 ## 技術與架構
 
