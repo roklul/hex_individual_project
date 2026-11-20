@@ -1,10 +1,10 @@
-# 拾日選物 Shiri Select — 後端 API
+# EMMA 電子零件 — 後端 API
 
-選物電商的後端服務，採 **Node.js + Express 5 + MongoDB (Mongoose)**，落實 MVC 分層。
+電子零件電商的後端服務（商品資料取自 EMMA Collection 露天賣場），採 **Node.js + Express 5 + MongoDB (Mongoose)**，落實 MVC 分層。
 
 - **線上 API Base URL**：`https://<your-api>.onrender.com/api`（部署後填入）
 - **前端網站**：`https://<your-web>.vercel.app`（部署後填入）
-- **前端 Repo**：`https://github.com/<you>/shiri-select-web`
+- **前端 Repo**：`https://github.com/<you>/hex_individual_project_web`
 
 ## 技術與架構
 
@@ -28,7 +28,7 @@ npm run dev:memory
 
 # 方式二：連線真實資料庫
 cp .env.example .env      # 填入 MONGODB_URI、JWT_SECRET 等
-npm run seed              # 建立 24 筆示範商品
+npm run seed              # 建立 34 筆電子零件商品
 npm run create-admin      # 依 .env 的 ADMIN_* 建立管理員
 npm run dev
 
@@ -83,11 +83,11 @@ npm test
 ### 商品 Products（公開）
 | Method | Path | 說明 |
 | --- | --- | --- |
-| GET | `/api/products` | 商品列表。Query：`page`(預設 1)、`limit`(1–50，預設 12)、`category`、`keyword`(比對名稱與描述)、`sort`(`newest` / `price_asc` / `price_desc`) |
+| GET | `/api/products` | 商品列表。Query：`page`(預設 1)、`limit`(1–50，預設 12)、`category`、`keyword`(比對名稱、品牌與描述，不分大小寫)、`sort`(`newest` / `price_asc` / `price_desc`) |
 | GET | `/api/products/categories` | 所有分類及各分類商品數 |
 | GET | `/api/products/:id` | 單一商品 |
 
-分類：`居家生活`、`餐廚器皿`、`香氛蠟燭`、`文具雜貨`、`植栽園藝`、`衣著配件`
+分類：`微控制器・處理器`、`邏輯・介面IC`、`類比・驅動IC`、`電源・穩壓`、`光耦・繼電器`、`開關・連接器`、`模組・配件`
 
 ### 商品管理 Admin（需管理員）
 | Method | Path | 說明 |
@@ -100,15 +100,16 @@ npm test
 新增商品 Body 範例：
 ```json
 {
-  "title": "手捏粗陶飯碗",
-  "category": "餐廚器皿",
-  "price": 450,
-  "originPrice": 520,
+  "title": "ADuM1201BRZ 數位隔離IC",
+  "brand": "Analog Devices ADI",
+  "category": "邏輯・介面IC",
+  "price": 140,
+  "originPrice": 160,
   "stock": 30,
-  "imageUrl": "https://picsum.photos/seed/bowl/800/800",
-  "description": "台灣陶藝職人手作",
+  "imageUrl": "https://picsum.photos/seed/chip/800/800",
+  "description": "雙通道數位隔離器，10Mbps",
   "content": "詳細說明…",
-  "unit": "件",
+  "unit": "顆",
   "isEnabled": true
 }
 ```
