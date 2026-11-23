@@ -79,7 +79,10 @@ export async function deleteProduct(req, res) {
   const product = await Product.findByIdAndDelete(req.params.id);
   if (!product) throw new AppError(404, '找不到此商品');
   // 同步把此商品從所有購物車移除
-  await Cart.updateMany({}, { $pull: { items: { product: product._id } } });
+  await Cart.updateMany(
+    { 'items.product': product._id },
+    { $pull: { items: { product: product._id } }, $inc: { __v: 1 } },
+  );
   res.json({ success: true, message: '商品已刪除' });
 }
 

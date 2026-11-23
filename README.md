@@ -9,12 +9,7 @@
 
 ### 測試帳號
 
-| 角色 | Email | 密碼 |
-| --- | --- | --- |
-| 一般會員 | `member@example.com` | `Member2338x` |
-| 管理員 | 寄送作業時另附 | 為避免公開後商品被任意刪改，不寫在 Repo 中 |
-
-> 也可以在網站自行註冊新會員測試。
+每位測試者在網站自行註冊會員，或在 Postman 個人環境設定 `memberEmail` 和 `memberPassword` 後執行「註冊」。既有會員可使用自己的帳號登入。管理員測試帳號由維運者私下提供。
 
 ## 技術與架構
 
@@ -38,15 +33,21 @@ npm install
 # 方式一：免安裝 MongoDB，使用記憶體資料庫（自動建立種子商品與開發用管理員）
 npm run dev:memory
 
-# 方式二：連線真實資料庫
+# 方式二：連線 MongoDB Atlas 或已啟用 replica set 的 MongoDB
 cp .env.example .env      # 填入 MONGODB_URI、JWT_SECRET 等
-npm run seed              # 建立 34 筆電子零件商品
+npm run seed              # 補齊 34 筆目錄商品，保留既有商品、庫存與購物車
 npm run create-admin      # 依 .env 的 ADMIN_* 建立管理員
 npm run dev
 
-# 自動化測試（記憶體資料庫，涵蓋權限與購物車邊界情況）
+# 自動化測試（使用本機暫存的單節點 replica set）
 npm test
 ```
+
+### 商品匯入與測試庫重置
+
+`npm run seed` 會用永久商品編號比對目錄，只新增缺少的商品。首次升級時，腳本會用舊版圖檔與商品文案識別既有商品並補上編號，保留原商品 ID、實際庫存、售價與上下架狀態，購物車和訂單仍指向同一件商品。遇到多筆可能的對應資料時，整次匯入會回滾，方便核對後重試。
+
+若要在無訂單的測試庫重新建立示範商品，執行 `npm run seed:reset -- --confirm-db=實際資料庫名`。這個命令會刪除該庫所有商品（含自建商品）、清空購物車，並重新載入目錄的示範庫存。只要已有任何訂單，腳本就會拒絕重置。
 
 ## 環境變數
 
@@ -55,7 +56,7 @@ npm test
 | 變數 | 說明 |
 | --- | --- |
 | `MONGODB_URI` | MongoDB 連線字串 |
-| `JWT_SECRET` | JWT 簽章密鑰（正式環境至少 32 字元） |
+| `JWT_SECRET` | 使用 `.env.example` 提供的指令產生隨機簽章密鑰。正式環境至少 32 字元，啟動時會拒絕公開範例值。 |
 | `JWT_EXPIRES_IN` | Token 有效期，預設 `7d` |
 | `CORS_ORIGIN` | 允許的前端網址，多個以逗號分隔 |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` / `ADMIN_NAME` | 僅供 `create-admin` 腳本使用 |
@@ -64,19 +65,19 @@ npm test
 
 1. 一般註冊 API **只接受** `name`、`email`、`password` 三個欄位（Zod `.strict()`），夾帶 `role`、`isAdmin` 等欄位會直接回 `400`。
 2. Controller 建立使用者時不從請求取角色，一律使用 Schema 預設值 `user`。
-3. **整個 API 沒有任何可修改角色的端點**；JWT 只存放使用者 id，角色在每次請求時由資料庫查詢，竄改 token 內容也無法提權（簽章會失效）。
+3. **整個 API 沒有任何可修改角色的端點**；JWT 記錄會員 ID 與工作階段版本。每次請求都會從資料庫確認版本與目前角色。
 4. 管理員**只能由具有資料庫與伺服器環境變數存取權的維運者**，在伺服器端執行：
    ```bash
    # 在 .env（或雲端平台的環境變數）設定 ADMIN_EMAIL / ADMIN_PASSWORD 後
    npm run create-admin
    ```
-   若該 Email 已存在則升級為管理員並重設密碼；否則建立新的管理員帳號。
+   Email 已存在時，腳本會在同一次資料庫更新中提升權限、重設密碼並撤銷該會員的所有舊 JWT。首次建立帳號時會直接授予管理員角色。
 
 > 審核用管理員帳密會另外提供，不寫在 Repo 中。
 
 ## API 文件
 
-**Postman Collection**：[`docs/emma-parts-api.postman_collection.json`](docs/emma-parts-api.postman_collection.json)——匯入 Postman 後依序執行「登入」，token 會自動帶入後續請求；內含各邊界情況的失敗範例（提權、401、403、404、不合理數量）。
+**Postman Collection**：[`docs/emma-parts-api.postman_collection.json`](docs/emma-parts-api.postman_collection.json)——匯入後預設連到線上 API。使用個人環境變數註冊或登入自己的測試帳號，token 會自動帶入後續請求。測試本機時可將 `baseUrl` 改為 `http://localhost:3000/api`。集合內含各邊界情況的失敗範例（提權、401、403、404、不合理數量）。
 
 所有回應格式：`{ success: boolean, message?: string, data?: any, pagination?: object, errors?: [{ field, message }] }`
 
@@ -165,7 +166,7 @@ npm test
 ### 訂單 Orders（需登入）
 | Method | Path | Body | 說明 |
 | --- | --- | --- | --- |
-| POST | `/api/orders` | `{ recipient: { name, phone, address }, paymentMethod, note? }` | 以購物車內容結帳。付款方式：`貨到付款`、`ATM 轉帳` |
+| POST | `/api/orders` | `{ quoteVersion, recipient: { name, phone, address }, paymentMethod, note? }` | 以購物車內容結帳。`quoteVersion` 取自購物車 API 回應；付款方式：`貨到付款`、`ATM 轉帳` |
 | GET | `/api/orders?page=&limit=` | — | 我的訂單（新到舊） |
 | GET | `/api/orders/:id` | — | 單一訂單（只能看自己的） |
 | POST | `/api/orders/:id/cancel` | — | 取消訂單（待付款、處理中才可取消），歸還庫存 |
@@ -173,9 +174,10 @@ npm test
 管理員：`GET /api/admin/orders` 查看全部訂單、`PATCH /api/admin/orders/:id` `{ status }` 更新狀態（待付款／處理中／已出貨／已完成／已取消）。
 
 #### 結帳規則
+- **報價版本確認**：購物車 API 每次回傳 `quoteVersion`（由購物車版本、商品價格、數量與運費計算）。下單時必須帶回買家最後看到的版本；若期間商品調價或購物車在其他分頁被修改，後端回 409，前端會顯示最新明細並請買家再次確認。同一份報價只能成立一張訂單。
 - **金額一律由後端計算**：前端送來的價格、總額、狀態會被拒絕（400），避免竄改金額。
 - **運費**：商品小計未滿 NT$500 收 NT$60，滿額免運（購物車 API 也會回傳 `shippingFee`、`grandTotal`）。
-- **防超賣**：以「庫存 ≥ 購買量」為條件逐項原子扣庫存；任一項失敗會回滾已扣的庫存並回 409。
+- **結帳交易**會一起完成扣庫存、建立訂單及清空購物車。寫入中斷會回滾整筆交易，同一份購物車同時送出也只會成立一張訂單。自架 MongoDB 需啟用 replica set，或使用支援交易的分片叢集。 `npm run dev:memory` 會自動啟動單節點 replica set。
 - **商品快照**：訂單保存下單當下的名稱、價格與圖片，之後商品改價或刪除不影響歷史訂單。
-- 成立訂單後清空購物車；取消訂單（會員或管理員）會歸還庫存，且不可重複取消。
+- 會員與管理員取消訂單時，狀態更新和庫存回補會在同一筆交易提交。即使兩人同時取消，庫存也只回補一次。
 - 本專案為作品展示，不串接金流，不會實際收款。

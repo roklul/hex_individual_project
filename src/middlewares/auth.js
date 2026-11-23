@@ -1,4 +1,4 @@
-import { User, ROLES } from '../models/User.js';
+import { User, ROLES, RETIRED_MEMBER_EMAIL } from '../models/User.js';
 import { AppError } from '../utils/AppError.js';
 import { verifyToken } from '../utils/token.js';
 
@@ -16,7 +16,11 @@ export async function authenticate(req, _res, next) {
   }
 
   const user = await User.findById(payload.sub);
-  if (!user) throw new AppError(401, '使用者不存在，請重新登入');
+  if (!user || user.email === RETIRED_MEMBER_EMAIL) throw new AppError(401, '登入已失效，請重新登入');
+
+  // 舊版 token 沒有版本，僅允許從未重設密碼或升權的一般會員沿用。
+  const sessionVersion = payload.sessionVersion ?? (user.role === ROLES.USER ? 0 : undefined);
+  if (sessionVersion !== user.sessionVersion) throw new AppError(401, '登入已失效，請重新登入');
   req.user = user;
   next();
 }

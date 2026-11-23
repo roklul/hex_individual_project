@@ -8,8 +8,10 @@ for (const key of required) {
   }
 }
 
-if (process.env.NODE_ENV === 'production' && process.env.JWT_SECRET.length < 32) {
-  console.error('[config] JWT_SECRET 長度至少需 32 字元');
+const exampleSecrets = ['change-me-to-a-long-random-string', 'dev-only-secret-not-for-production-use-0123456789'];
+if (process.env.NODE_ENV === 'production' &&
+    (process.env.JWT_SECRET.trim().length < 32 || exampleSecrets.includes(process.env.JWT_SECRET.trim()))) {
+  console.error('[config] 正式環境的 JWT_SECRET 必須使用自行產生、至少 32 字元的隨機密鑰');
   process.exit(1);
 }
 

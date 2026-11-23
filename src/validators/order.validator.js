@@ -4,6 +4,7 @@ import { isValidTwPhone } from '../utils/phone.js';
 
 export const createOrderSchema = z
   .object({
+    quoteVersion: z.string().regex(/^[a-f0-9]{64}$/, '請先讀取購物車並確認最新報價'),
     recipient: z
       .object({
         name: z.string().trim().min(1, '請輸入收件人姓名').max(50, '收件人姓名最多 50 字'),

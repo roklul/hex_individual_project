@@ -3,19 +3,29 @@ import bcrypt from 'bcryptjs';
 
 export const ROLES = Object.freeze({ USER: 'user', ADMIN: 'admin' });
 
+// 保留已停用的共用會員識別碼，即使舊資料庫仍有此帳號也不能再登入或註冊。
+export const RETIRED_MEMBER_EMAIL = 'member@example.com';
+
+export function hashPassword(password) {
+  return bcrypt.hash(password, 12);
+}
+
 const userSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true, maxlength: 50 },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     password: { type: String, required: true, select: false },
     role: { type: String, enum: Object.values(ROLES), default: ROLES.USER },
+    sessionVersion: { type: Number, default: 0 },
   },
   { timestamps: true },
 );
 
-userSchema.pre('save', async function hashPassword() {
-  if (!this.isModified('password')) return;
-  this.password = await bcrypt.hash(this.password, 12);
+userSchema.pre('save', async function updateCredentials() {
+  if (!this.isNew && (this.isModified('password') || this.isModified('role'))) {
+    this.$inc('sessionVersion', 1);
+  }
+  if (this.isModified('password')) this.password = await hashPassword(this.password);
 });
 
 userSchema.methods.comparePassword = function comparePassword(plain) {

@@ -4,6 +4,7 @@ import { Cart } from '../models/Cart.js';
 import { Product } from '../models/Product.js';
 import { calcShipping } from '../config/shipping.js';
 import { AppError } from '../utils/AppError.js';
+import { cartQuote } from './cart.controller.js';
 
 function makeOrderNo() {
   const d = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10).replace(/-/g, ''); // 台灣日期
@@ -15,39 +16,38 @@ const toDTO = (o) => {
   return { id: _id, ...rest };
 };
 
-/** 歸還庫存（取消訂單、或下單過程中途失敗時回滾） */
-async function restoreStock(items) {
-  await Promise.all(items.map((i) => Product.updateOne({ _id: i.product }, { $inc: { stock: i.quantity } })));
-}
-
 export async function createOrder(req, res) {
-  const { recipient, paymentMethod, note = '' } = req.validated.body;
-  const cart = await Cart.findOne({ user: req.user._id }).populate('items.product');
-  const lines = (cart?.items || []).filter((i) => i.product);
-  if (lines.length === 0) throw new AppError(400, '購物車是空的，無法結帳');
-
-  // 先完整檢查一次，一次回報所有問題
-  const problems = lines
-    .map(({ product: p, quantity }) => {
-      if (!p.isEnabled) return `「${p.title}」已下架`;
-      if (p.stock < quantity) return p.stock === 0 ? `「${p.title}」已售完` : `「${p.title}」庫存僅剩 ${p.stock} ${p.unit}`;
-      return null;
-    })
-    .filter(Boolean);
-  if (problems.length) throw new AppError(400, `請先調整購物車：${problems.join('；')}`, problems.map((message) => ({ message })));
-
-  // 逐項以「庫存足夠」為條件原子扣庫存，避免兩人同時搶最後一件時超賣
-  const reserved = [];
-  for (const { product: p, quantity } of lines) {
-    const r = await Product.updateOne({ _id: p._id, isEnabled: true, stock: { $gte: quantity } }, { $inc: { stock: -quantity } });
-    if (r.modifiedCount !== 1) {
-      await restoreStock(reserved);
-      throw new AppError(409, `「${p.title}」庫存剛被買走，請重新確認購物車`);
+  const { recipient, paymentMethod, quoteVersion, note = '' } = req.validated.body;
+  const order = await Order.db.transaction(async (session) => {
+    const cart = await Cart.findOne({ user: req.user._id }).session(session).populate({
+      path: 'items.product', options: { session },
+    });
+    if (cartQuote(cart).quoteVersion !== quoteVersion) {
+      const message = '購物車內容、價格或可購買數量已變更，請重新確認後再下單';
+      throw new AppError(409, message, [{ field: 'quoteVersion', message }]);
     }
-    reserved.push({ product: p._id, quantity });
-  }
+    const lines = (cart?.items || []).filter((i) => i.product);
+    if (lines.length === 0) throw new AppError(400, '購物車是空的，無法結帳');
 
-  try {
+    const problems = lines
+      .map(({ product: p, quantity }) => {
+        if (!p.isEnabled) return `「${p.title}」已下架`;
+        if (p.stock < quantity) return p.stock === 0 ? `「${p.title}」已售完` : `「${p.title}」庫存僅剩 ${p.stock} ${p.unit}`;
+        return null;
+      })
+      .filter(Boolean);
+    if (problems.length) throw new AppError(400, `請先調整購物車：${problems.join('；')}`, problems.map((message) => ({ message })));
+
+    await Cart.updateOne({ _id: cart._id }, { $set: { items: [] }, $inc: { __v: 1 } }, { session });
+    for (const { product: p, quantity } of lines) {
+      const result = await Product.updateOne(
+        { _id: p._id, isEnabled: true, stock: { $gte: quantity } },
+        { $inc: { stock: -quantity } },
+        { session },
+      );
+      if (result.modifiedCount !== 1) throw new AppError(409, `「${p.title}」庫存剛被買走，請重新確認購物車`);
+    }
+
     const items = lines.map(({ product: p, quantity }) => ({
       product: p._id,
       title: p.title,
@@ -61,7 +61,7 @@ export async function createOrder(req, res) {
     const subtotal = items.reduce((s, i) => s + i.subtotal, 0);
     const shippingFee = calcShipping(subtotal);
 
-    const order = await Order.create({
+    return new Order({
       orderNo: makeOrderNo(),
       user: req.user._id,
       items,
@@ -72,15 +72,9 @@ export async function createOrder(req, res) {
       shippingFee,
       total: subtotal + shippingFee,
       status: paymentMethod === 'ATM 轉帳' ? '待付款' : '處理中',
-    });
-
-    cart.items = [];
-    await cart.save();
-    res.status(201).json({ success: true, message: '訂單已成立', data: toDTO(order) });
-  } catch (err) {
-    await restoreStock(reserved);
-    throw err;
-  }
+    }).save({ session });
+  });
+  res.status(201).json({ success: true, message: '訂單已成立', data: toDTO(order) });
 }
 
 export async function listMyOrders(req, res) {
@@ -109,19 +103,30 @@ export async function getMyOrder(req, res) {
 }
 
 export async function cancelMyOrder(req, res) {
-  const order = await findMyOrder(req);
-  if (!CANCELLABLE_STATUS.includes(order.status)) {
-    throw new AppError(400, `訂單狀態為「${order.status}」，無法取消`);
-  }
-  // 以目前狀態為條件更新，避免重複取消造成庫存重複歸還
-  const updated = await Order.findOneAndUpdate(
-    { _id: order._id, status: { $in: CANCELLABLE_STATUS } },
-    { status: '已取消', cancelledAt: new Date() },
-    { new: true },
-  );
-  if (!updated) throw new AppError(409, '訂單狀態已變更，請重新整理');
-  await restoreStock(updated.items);
+  const updated = await changeOrderStatus({ _id: req.params.id, user: req.user._id }, '已取消', CANCELLABLE_STATUS);
   res.json({ success: true, message: '訂單已取消', data: toDTO(updated) });
+}
+
+async function changeOrderStatus(filter, status, allowedStatuses) {
+  return Order.db.transaction(async (session) => {
+    const cancelling = status === '已取消';
+    const updated = await Order.findOneAndUpdate(
+      { ...filter, status: allowedStatuses ? { $in: allowedStatuses } : { $ne: '已取消' } },
+      { $set: cancelling ? { status, cancelledAt: new Date() } : { status } },
+      { returnDocument: 'after', session },
+    );
+    if (!updated) {
+      const current = await Order.findOne(filter).select('status').session(session);
+      if (!current) throw new AppError(404, '找不到此訂單');
+      throw new AppError(400, allowedStatuses ? `訂單狀態為「${current.status}」，無法取消` : '已取消的訂單無法變更狀態');
+    }
+    if (cancelling) {
+      for (const { product, quantity } of updated.items) {
+        await Product.updateOne({ _id: product }, { $inc: { stock: quantity } }, { session });
+      }
+    }
+    return updated;
+  });
 }
 
 /* ---------- 管理員 ---------- */
@@ -141,15 +146,6 @@ export async function adminListOrders(req, res) {
 
 export async function adminUpdateOrderStatus(req, res) {
   const { status } = req.validated.body;
-  const order = await Order.findById(req.params.id);
-  if (!order) throw new AppError(404, '找不到此訂單');
-  if (order.status === '已取消') throw new AppError(400, '已取消的訂單無法變更狀態');
-
-  if (status === '已取消') {
-    order.cancelledAt = new Date();
-    await restoreStock(order.items);
-  }
-  order.status = status;
-  await order.save();
+  const order = await changeOrderStatus({ _id: req.params.id }, status);
   res.json({ success: true, message: `訂單狀態已更新為「${status}」`, data: toDTO(order) });
 }

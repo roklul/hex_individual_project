@@ -2,21 +2,20 @@
 // 用法：在 .env 設定 ADMIN_EMAIL / ADMIN_PASSWORD / ADMIN_NAME 後執行 npm run create-admin
 import 'dotenv/config';
 import mongoose from 'mongoose';
-import { User, ROLES } from '../src/models/User.js';
+import { User, ROLES, RETIRED_MEMBER_EMAIL, hashPassword } from '../src/models/User.js';
 
 export async function upsertAdmin({ email, password, name = 'Admin' }) {
-  if (!email || !password) throw new Error('請設定 ADMIN_EMAIL 與 ADMIN_PASSWORD');
+  if (!email?.trim() || !password) throw new Error('請設定 ADMIN_EMAIL 與 ADMIN_PASSWORD');
   if (password.length < 8) throw new Error('ADMIN_PASSWORD 至少 8 碼');
 
-  let user = await User.findOne({ email: email.toLowerCase() });
-  if (user) {
-    user.role = ROLES.ADMIN;
-    user.password = password; // pre-save hook 會重新雜湊
-    user.name = name;
-  } else {
-    user = new User({ email, password, name, role: ROLES.ADMIN });
-  }
-  await user.save();
+  const normalizedEmail = email.trim().toLowerCase();
+  if (normalizedEmail === RETIRED_MEMBER_EMAIL) throw new Error('此共用會員帳號已停用');
+
+  const user = await User.findOneAndUpdate(
+    { email: normalizedEmail },
+    { $set: { role: ROLES.ADMIN, password: await hashPassword(password), name }, $inc: { sessionVersion: 1 } },
+    { upsert: true, returnDocument: 'after', runValidators: true },
+  );
   console.log(`[admin] 管理員已就緒：${user.email}`);
   return user;
 }

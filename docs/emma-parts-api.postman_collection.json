@@ -2,7 +2,7 @@
   "info": {
     "name": "EMMA 電子零件 API",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "EMMA 電子零件電商後端 API。\n\n使用方式：\n1. 匯入本檔，確認 Collection Variables 的 `baseUrl`（預設為線上 API）。\n2. 依序執行「會員」資料夾的「登入（一般會員）」與「登入（管理員）」，token 會自動存入 `token` / `adminToken`。\n3. 執行「商品列表」會自動把第一筆商品 id 存入 `productId`，購物車請求會用到。\n\n回應格式：`{ success, message?, data?, pagination?, errors?: [{ field, message }] }`\n需要登入的 API 使用 `Authorization: Bearer <token>`（本 Collection 已在各請求設定好）。"
+    "description": "EMMA 電子零件電商後端 API。\n\n使用方式：\n1. 預設連到線上 API；如需測試本機服務，將 baseUrl 改為 http://localhost:3000/api。\n2. 在 Postman 個人環境設定 memberEmail 和 memberPassword，執行「會員」的「註冊」。已註冊的會員可直接執行「登入（一般會員）」。兩個請求都會儲存會員 token。\n3. 需要測試管理員 API 時，以同樣方式設定私下取得的 adminEmail 和 adminPassword，再執行「登入（管理員）」。\n4. 執行「商品列表」會將第一筆商品 ID 存入 productId，供購物車請求使用。\n\n回應格式：`{ success, message?, data?, pagination?, errors?: [{ field, message }] }`\n需要登入的 API 使用 `Authorization: Bearer <token>`（本 Collection 已在各請求設定好）。"
   },
   "variable": [
     {
@@ -11,19 +11,19 @@
     },
     {
       "key": "memberEmail",
-      "value": "member@example.com"
+      "value": ""
     },
     {
       "key": "memberPassword",
-      "value": "Member2338x"
+      "value": ""
     },
     {
       "key": "adminEmail",
-      "value": "admin@example.com"
+      "value": ""
     },
     {
       "key": "adminPassword",
-      "value": "請填入審核用管理員密碼"
+      "value": ""
     },
     {
       "key": "token",
@@ -43,6 +43,10 @@
     },
     {
       "key": "orderId",
+      "value": ""
+    },
+    {
+      "key": "quoteVersion",
       "value": ""
     }
   ],
@@ -147,7 +151,7 @@
             "description": "嘗試在註冊時夾帶 role: admin，驗證會以 .strict() 拒絕。",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"壞人\",\n  \"email\": \"hacker@example.com\",\n  \"password\": \"Hacker1234\",\n  \"role\": \"admin\"\n}",
+              "raw": "{\n  \"name\": \"壞人\",\n  \"email\": \"{{memberEmail}}\",\n  \"password\": \"{{memberPassword}}\",\n  \"role\": \"admin\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -793,6 +797,19 @@
             }
           ]
         }
+      ],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// 購物車回應都附上報價版本，結帳時必須帶回，後端用它確認買家看到的就是最新明細",
+              "const json = pm.response.json();",
+              "if (json && json.data && json.data.quoteVersion) { pm.collectionVariables.set(\"quoteVersion\", json.data.quoteVersion); }"
+            ]
+          }
+        }
       ]
     },
     {
@@ -1022,7 +1039,7 @@
     },
     {
       "name": "5. 訂單 Orders（需登入）",
-      "description": "結帳會以購物車內容建立訂單：後端重新計算金額、以原子操作扣庫存（不會超賣）並清空購物車。請先在購物車加入商品。運費：未滿 NT$500 收 NT$60。",
+      "description": "結帳會以購物車內容建立訂單：後端重新計算金額、以原子操作扣庫存（不會超賣）並清空購物車。請先在購物車加入商品。運費：未滿 NT$500 收 NT$60。 下單必須帶上購物車回應中的 quoteVersion，確保送出的是買家最後看到的明細。",
       "item": [
         {
           "name": "建立訂單（結帳）",
@@ -1043,7 +1060,7 @@
                 "orders"
               ]
             },
-            "description": "paymentMethod：`貨到付款`（狀態為處理中）或 `ATM 轉帳`（狀態為待付款）。購物車為空、庫存不足、欄位錯誤回 400；夾帶 total、status 等額外欄位回 400。",
+            "description": "先執行「3. 購物車」任一請求取得最新 `quoteVersion`（會自動存入變數）再下單。購物車或價格在這之後有變動會回 409，請重新查看購物車再送出。paymentMethod：`貨到付款`（處理中）或 `ATM 轉帳`（待付款）。夾帶 total、status 等額外欄位回 400。",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -1056,7 +1073,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"recipient\": {\n    \"name\": \"王小明\",\n    \"phone\": \"0912345678\",\n    \"address\": \"台北市中正區重慶南路一段 122 號\"\n  },\n  \"paymentMethod\": \"貨到付款\",\n  \"note\": \"請小心包裝\"\n}",
+              "raw": "{\n  \"quoteVersion\": \"{{quoteVersion}}\",\n  \"recipient\": {\n    \"name\": \"王小明\",\n    \"phone\": \"0912345678\",\n    \"address\": \"台北市中正區重慶南路一段 122 號\"\n  },\n  \"paymentMethod\": \"貨到付款\",\n  \"note\": \"請小心包裝\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1108,7 +1125,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"recipient\": {\n    \"name\": \"王小明\",\n    \"phone\": \"123\",\n    \"address\": \"台北市中正區重慶南路一段 122 號\"\n  },\n  \"paymentMethod\": \"貨到付款\"\n}",
+              "raw": "{\n  \"quoteVersion\": \"{{quoteVersion}}\",\n  \"recipient\": {\n    \"name\": \"王小明\",\n    \"phone\": \"123\",\n    \"address\": \"台北市中正區重慶南路一段 122 號\"\n  },\n  \"paymentMethod\": \"貨到付款\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

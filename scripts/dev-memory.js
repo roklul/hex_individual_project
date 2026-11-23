@@ -1,8 +1,8 @@
 // 本機快速體驗：不需安裝 MongoDB，啟動記憶體資料庫 + 種子資料 + 開發用管理員
 // 用法：npm run dev:memory   （資料在程式結束後即消失）
-import { MongoMemoryServer } from 'mongodb-memory-server';
+import { MongoMemoryReplSet } from 'mongodb-memory-server';
 
-const mongod = await MongoMemoryServer.create();
+const mongod = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
 process.env.MONGODB_URI = mongod.getUri('selectshop');
 process.env.JWT_SECRET ||= 'dev-only-secret-not-for-production-use-0123456789';
 process.env.CORS_ORIGIN ||= 'http://localhost:5173';

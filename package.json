@@ -8,6 +8,7 @@
     "dev": "nodemon src/server.js",
     "dev:memory": "node scripts/dev-memory.js",
     "seed": "node scripts/seed.js",
+    "seed:reset": "node scripts/seed.js --reset",
     "create-admin": "node scripts/create-admin.js",
     "test": "node --test --test-concurrency=1 \"tests/**/*.test.js\""
   },

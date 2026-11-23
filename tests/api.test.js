@@ -1,6 +1,6 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { MongoMemoryServer } from 'mongodb-memory-server';
+import { MongoMemoryReplSet } from 'mongodb-memory-server';
 
 let mongod, server, base, mongoose;
 let userToken, adminToken, productId, soldOutId, lowStockId;
@@ -14,8 +14,15 @@ const api = async (method, path, { token, body } = {}) => {
   return { status: res.status, json: await res.json() };
 };
 
+const getQuote = async (token) => {
+  const response = await api('GET', '/cart', { token });
+  assert.equal(response.status, 200);
+  assert.match(response.json.data.quoteVersion, /^[a-f0-9]{64}$/);
+  return response.json.data;
+};
+
 before(async () => {
-  mongod = await MongoMemoryServer.create();
+  mongod = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
   process.env.MONGODB_URI = mongod.getUri('test');
   process.env.JWT_SECRET = 'test-secret-0123456789-0123456789-abcdef';
   process.env.NODE_ENV = 'test';
@@ -24,6 +31,7 @@ before(async () => {
   const { runSeed } = await import('../scripts/seed.js');
   const { upsertAdmin } = await import('../scripts/create-admin.js');
   await mongoose.connect(process.env.MONGODB_URI);
+  await Promise.all(Object.values(mongoose.models).map((model) => model.init()));
   await runSeed();
   await upsertAdmin({ email: 'admin@test.local', password: 'Admin1234' });
   server = createApp().listen(0);
@@ -187,12 +195,15 @@ test('結帳與訂單', async () => {
   const stockOf = async (id) => (await api('GET', `/products/${id}`)).json.data.stock;
 
   // 空購物車不能結帳
-  let r = await api('POST', '/orders', { token: userToken, body: { recipient, paymentMethod: '貨到付款' } });
+  const emptyQuote = await getQuote(userToken);
+  let r = await api('POST', '/orders', { token: userToken, body: { recipient, paymentMethod: '貨到付款', quoteVersion: emptyQuote.quoteVersion } });
   assert.equal(r.status, 400);
+  assert.match(r.json.message, /購物車是空的/);
 
   await api('POST', '/cart/items', { token: userToken, body: { productId: lowStockId, quantity: 2 } });
   await api('POST', '/cart/items', { token: userToken, body: { productId, quantity: 1 } });
   const lowBefore = await stockOf(lowStockId);
+  const { quoteVersion } = await getQuote(userToken);
 
   // 欄位驗證
   for (const body of [
@@ -203,14 +214,14 @@ test('結帳與訂單', async () => {
     { recipient, paymentMethod: '貨到付款', status: '已完成' },
     { recipient, paymentMethod: '貨到付款', total: 1 },
   ]) {
-    r = await api('POST', '/orders', { token: userToken, body });
+    r = await api('POST', '/orders', { token: userToken, body: { ...body, quoteVersion } });
     assert.equal(r.status, 400, JSON.stringify(body));
   }
   r = await api('POST', '/orders', { body: { recipient, paymentMethod: '貨到付款' } });
   assert.equal(r.status, 401);
 
   // 成立訂單：金額由後端計算、扣庫存、清空購物車
-  r = await api('POST', '/orders', { token: userToken, body: { recipient, paymentMethod: '貨到付款', note: '請小心包裝' } });
+  r = await api('POST', '/orders', { token: userToken, body: { recipient, paymentMethod: '貨到付款', quoteVersion, note: '請小心包裝' } });
   assert.equal(r.status, 201);
   const big = r.json.data;
   assert.match(big.orderNo, /^EM\d{14}$/);
@@ -225,7 +236,7 @@ test('結帳與訂單', async () => {
   await api('POST', '/cart/items', { token: userToken, body: { productId, quantity: 1 } });
   r = await api('GET', '/cart', { token: userToken });
   assert.equal(r.json.data.shippingFee, 60);
-  r = await api('POST', '/orders', { token: userToken, body: { recipient, paymentMethod: 'ATM 轉帳' } });
+  r = await api('POST', '/orders', { token: userToken, body: { recipient, paymentMethod: 'ATM 轉帳', quoteVersion: r.json.data.quoteVersion } });
   const small = r.json.data;
   assert.equal(small.shippingFee, 60);
   assert.equal(small.total, 140 + 60);
@@ -255,7 +266,7 @@ test('結帳與訂單', async () => {
   await api('POST', '/cart/items', { token: userToken, body: { productId, quantity: 1 } });
   const okStock = await stockOf(productId);
   await api('PATCH', `/admin/products/${lowStockId}`, { token: adminToken, body: { stock: 1 } });
-  r = await api('POST', '/orders', { token: userToken, body: { recipient, paymentMethod: '貨到付款' } });
+  r = await api('POST', '/orders', { token: userToken, body: { recipient, paymentMethod: '貨到付款', quoteVersion: (await getQuote(userToken)).quoteVersion } });
   assert.equal(r.status, 400);
   assert.match(r.json.message, /庫存僅剩 1/);
   assert.equal(await stockOf(productId), okStock);
@@ -270,4 +281,133 @@ test('結帳與訂單', async () => {
   assert.equal(r.status, 400); // 已出貨不能由會員取消
   r = await api('PATCH', `/admin/orders/${big.id}`, { token: adminToken, body: { status: '已出貨' } });
   assert.equal(r.status, 400); // 已取消不能再改
+});
+
+// 各案例使用獨立會員、購物車與商品，同時驗證 HTTP 結果及交易提交後的資料。
+async function checkoutFixture(email) {
+  const registration = await api('POST', '/auth/register', {
+    body: { name: '測試會員', email, password: 'CartTest123' },
+  });
+  assert.equal(registration.status, 201);
+  const { token, user } = registration.json.data;
+  const { Product, Cart, Order } = mongoose.models;
+  const products = await Product.create(['零件甲', '零件乙'].map((title) => ({
+    title, category: '模組・配件', price: 100, imageUrl: 'https://example.com/part.jpg', stock: 5,
+  })));
+  for (const product of products) {
+    const added = await api('POST', '/cart/items', { token, body: { productId: product.id, quantity: 2 } });
+    assert.equal(added.status, 201);
+  }
+  async function storedState() {
+    const orders = await Order.find({ user: user.id }).lean();
+    const cart = await Cart.findOne({ user: user.id }).lean();
+    const stocks = await Promise.all(products.map(async (p) => (await Product.findById(p._id)).stock));
+    return { statuses: orders.map((o) => o.status), quantities: cart.items.map((i) => i.quantity), stocks };
+  }
+  const initialQuote = await getQuote(token);
+  const submit = (quoteVersion = initialQuote.quoteVersion) => api('POST', '/orders', { token, body: {
+    recipient: { name: '測試收件人', phone: '0912345678', address: '測試路一段一號' },
+    paymentMethod: '貨到付款', quoteVersion,
+  } });
+  return { token, products, storedState, submit, initialQuote };
+}
+
+test('同一份購物車並行結帳只會產生一張訂單並扣一次庫存', async () => {
+  const { submit, storedState } = await checkoutFixture('checkout-concurrent@example.test');
+  const responses = await Promise.all([submit(), submit()]);
+  assert.equal(responses.filter((r) => r.status === 201).length, 1);
+  assert.ok(responses.some((r) => [400, 409].includes(r.status)));
+  assert.deepEqual(await storedState(), { statuses: ['處理中'], quantities: [], stocks: [3, 3] });
+});
+
+test('調價或變更購物車後，舊報價不能送單，買家重新確認後依新明細成立', async () => {
+  const { token, products, storedState, submit, initialQuote } = await checkoutFixture('checkout-quote@example.test');
+  const body = {
+    recipient: { name: '測試收件人', phone: '0912345678', address: '測試路一段一號' },
+    paymentMethod: '貨到付款',
+  };
+  assert.equal((await api('POST', '/orders', { token, body })).status, 400);
+  assert.equal((await submit('invalid')).status, 400);
+  assert.equal((await getQuote(token)).quoteVersion, initialQuote.quoteVersion);
+
+  const priceChange = await api('PATCH', `/admin/products/${products[0].id}`, { token: adminToken, body: { price: 200 } });
+  assert.equal(priceChange.status, 200);
+  const stalePrice = await submit();
+  assert.equal(stalePrice.status, 409);
+  assert.equal(stalePrice.json.errors[0].field, 'quoteVersion');
+  assert.deepEqual(await storedState(), { statuses: [], quantities: [2, 2], stocks: [5, 5] });
+  const newPrice = await getQuote(token);
+  assert.notEqual(newPrice.quoteVersion, initialQuote.quoteVersion);
+  assert.equal(newPrice.grandTotal, 600); // 新金額達免運門檻
+
+  const edited = await api('PATCH', `/cart/items/${products[0].id}`, { token, body: { quantity: 1 } });
+  assert.equal(edited.status, 200);
+  const editedCart = edited.json.data;
+  assert.ok(editedCart.cartVersion > newPrice.cartVersion);
+  assert.notEqual(editedCart.quoteVersion, newPrice.quoteVersion);
+  assert.equal((await submit(newPrice.quoteVersion)).status, 409);
+  assert.deepEqual(await storedState(), { statuses: [], quantities: [1, 2], stocks: [5, 5] });
+  const confirmed = await submit(editedCart.quoteVersion);
+  assert.equal(confirmed.status, 201);
+  assert.equal(confirmed.json.data.total, 460);
+  assert.equal(confirmed.json.data.total, editedCart.grandTotal);
+  assert.ok((await getQuote(token)).cartVersion > editedCart.cartVersion);
+});
+
+test('同款並行加購會合併數量，並在同一次寫入守住庫存上限', async () => {
+  const r = await api('POST', '/auth/register', { body: { name: 'Buyer', email: 'add-race@example.test', password: 'CartTest123' } });
+  assert.equal(r.status, 201);
+  const { token } = r.json.data;
+  const product = await mongoose.models.Product.create({
+    title: '並行加購測試', category: '模組・配件', price: 100, stock: 5, imageUrl: 'https://example.com/part.jpg',
+  });
+  const add = (quantity) => api('POST', '/cart/items', { token, body: { productId: product.id, quantity } });
+  const first = await Promise.all([add(1), add(1)]);
+  assert.deepEqual(first.map((res) => res.status).sort(), [200, 201]);
+  assert.notEqual(first[0].json.data.cartVersion, first[1].json.data.cartVersion);
+  const limited = await Promise.all([add(2), add(2)]);
+  assert.deepEqual(limited.map((res) => res.status).sort(), [200, 400]);
+  const cart = await getQuote(token);
+  assert.equal(cart.items.length, 1);
+  assert.equal(cart.items[0].quantity, 4);
+});
+
+test('訂單寫入失敗會還原購物車與庫存，重試可正常成立一次', async (t) => {
+  const { submit, storedState } = await checkoutFixture('checkout-rollback@example.test');
+  const failure = t.mock.method(mongoose.models.Order.collection, 'insertOne', async () => {
+    throw Object.assign(new Error('模擬訂單寫入中斷'), { statusCode: 503 });
+  });
+  const failed = await submit();
+  failure.mock.restore();
+  assert.equal(failed.status, 503);
+  assert.deepEqual(await storedState(), { statuses: [], quantities: [2, 2], stocks: [5, 5] });
+  assert.equal((await submit()).status, 201);
+  assert.deepEqual(await storedState(), { statuses: ['處理中'], quantities: [], stocks: [3, 3] });
+});
+
+test('取消訂單若中途回補失敗可重試，會員與管理員同時取消僅生效一次', async (t) => {
+  const { token, products, storedState, submit } = await checkoutFixture('cancel-rollback@example.test');
+  const placed = await submit();
+  assert.equal(placed.status, 201);
+  const id = placed.json.data.id;
+  const cancel = () => api('POST', `/orders/${id}/cancel`, { token });
+  const adminCancel = () => api('PATCH', `/admin/orders/${id}`, { token: adminToken, body: { status: '已取消' } });
+
+  const collection = mongoose.models.Product.collection;
+  const updateOne = collection.updateOne.bind(collection);
+  const failure = t.mock.method(collection, 'updateOne', async (filter, ...args) => {
+    if (products[1]._id.equals(filter._id)) {
+      throw Object.assign(new Error('模擬回補第二項商品時中斷'), { statusCode: 503 });
+    }
+    return updateOne(filter, ...args);
+  });
+  const failed = await cancel();
+  failure.mock.restore();
+  assert.equal(failed.status, 503);
+  assert.deepEqual(await storedState(), { statuses: ['處理中'], quantities: [], stocks: [3, 3] });
+
+  const responses = await Promise.all([cancel(), adminCancel()]);
+  assert.equal(responses.filter((r) => r.status === 200).length, 1);
+  assert.ok(responses.some((r) => [400, 409].includes(r.status)));
+  assert.deepEqual(await storedState(), { statuses: ['已取消'], quantities: [], stocks: [5, 5] });
 });

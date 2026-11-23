@@ -4,6 +4,7 @@ export const CATEGORIES = Object.freeze(['微控制器・處理器', '邏輯・�
 
 const productSchema = new mongoose.Schema(
   {
+    catalogKey: { type: String, unique: true, sparse: true, select: false },
     title: { type: String, required: true, trim: true, maxlength: 100 },
     brand: { type: String, default: '', trim: true, maxlength: 50 },
     description: { type: String, default: '', maxlength: 2000 },
