@@ -2,7 +2,7 @@
 // 價格為賣場標示價（多款式商品取最低價），庫存為示範數值。
 // 商品圖由前端（Cloudflare Pages）的 public/products/ 提供：露天圖床會擋外站引用，改用自己整理的圖。
 // 順序與下方 raw 陣列一一對應。可用環境變數 PRODUCT_IMAGE_BASE 改圖片網域。
-const IMG_BASE = process.env.PRODUCT_IMAGE_BASE || 'https://hex-individual-project-web.pages.dev/products'
+const IMG_BASE = process.env.PRODUCT_IMAGE_BASE || 'https://emma-parts.pages.dev/products'
 const IMAGE_FILES = [
   'p00-pic18f2580.webp',
   'p01-cy8c3866axi.webp',
