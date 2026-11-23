@@ -1,6 +1,45 @@
 // 商品資料取自「EMMA Collection」露天賣場（https://www.ruten.com.tw/store/wawa4546/）電子零件分類。
 // 價格為賣場標示價（多款式商品取最低價），庫存為示範數值。
-const img = (path) => `https://gcs.rimg.com.tw/${path}.jpg`.replace('.jpg.jpg', '.jpg')
+// 商品圖由前端（Cloudflare Pages）的 public/products/ 提供：露天圖床會擋外站引用，改用自己整理的圖。
+// 順序與下方 raw 陣列一一對應。可用環境變數 PRODUCT_IMAGE_BASE 改圖片網域。
+const IMG_BASE = process.env.PRODUCT_IMAGE_BASE || 'https://hex-individual-project-web.pages.dev/products'
+const IMAGE_FILES = [
+  'p00-pic18f2580.webp',
+  'p01-cy8c3866axi.webp',
+  'p02-pl3150-l10.webp',
+  'p03-n74f00d.webp',
+  'p04-74hc541.webp',
+  'p05-adm4853.webp',
+  'p06-adm211.webp',
+  'p07-adum1201brz.webp',
+  'p08-tl16c550cfn.webp',
+  'p09-ht16k33.webp',
+  'p10-lm358dt.webp',
+  'p11-lt218.webp',
+  'p12-1edi05i12afxuma1.webp',
+  'p13-bs813a-1.webp',
+  'p14-ai-u-118.webp',
+  'p15-l7824cv.webp',
+  'p16-l7815cv.webp',
+  'p17-az1117-h-3-3.webp',
+  'p18-va-3r33r3sl.webp',
+  'p19-mpl-05s-12eup.webp',
+  'p20-4n35.webp',
+  'p21-k30102atld.webp',
+  'p22-rwh-sh-124d.webp',
+  'p23-dtsm-24nq.webp',
+  'p24-dtsm-62n-v-b.webp',
+  'p25-conn-44-4130-32s-gp.webp',
+  'p26-esb35101000z.webp',
+  'p27-49us.webp',
+  'p28-heds-9732-t50.webp',
+  'p29-zestetm1.webp',
+  'p30-ftt-10a.webp',
+  'p31-te-512.webp',
+  'p32-mini.webp',
+  'p33-iron26.webp'
+]
+const img = (_path, i) => `${IMG_BASE}/${IMAGE_FILES[i]}`
 
 // [分類, 品牌, 商品名稱, 簡述, 價格, 單位, 庫存, 圖片路徑]
 const raw = [
@@ -61,7 +100,7 @@ export const seedProducts = raw.map(([category, brand, title, description, price
   content: `${description}\n\n・品牌：${brand}\n・實際規格請以原廠資料手冊（Datasheet）為準\n・庫存零件，出貨前會再次核對型號與數量`,
   price,
   unit,
-  imageUrl: img(path),
+  imageUrl: img(path, i),
   stock,
   isEnabled: true,
   createdAt: new Date(Date.now() - i * 60_000),
