@@ -64,6 +64,8 @@ npm test
 
 ## API 文件
 
+**Postman Collection**：[`docs/emma-parts-api.postman_collection.json`](docs/emma-parts-api.postman_collection.json)——匯入 Postman 後依序執行「登入」，token 會自動帶入後續請求；內含各邊界情況的失敗範例（提權、401、403、404、不合理數量）。
+
 所有回應格式：`{ success: boolean, message?: string, data?: any, pagination?: object, errors?: [{ field, message }] }`
 
 需要登入的 API 請帶 Header：`Authorization: Bearer <token>`
