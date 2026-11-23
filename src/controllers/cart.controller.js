@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { Cart, MAX_QTY_PER_ITEM } from '../models/Cart.js';
 import { Product } from '../models/Product.js';
 import { AppError } from '../utils/AppError.js';
+import { calcShipping, FREE_SHIPPING_THRESHOLD } from '../config/shipping.js';
 
 const PRODUCT_FIELDS = 'title price originPrice unit imageUrl stock category isEnabled';
 
@@ -36,10 +37,15 @@ async function buildCartResponse(cart) {
     };
   });
   const payable = items.filter((i) => i.available);
+  const total = payable.reduce((s, i) => s + i.subtotal, 0);
+  const shippingFee = calcShipping(total);
   return {
     items,
     totalQuantity: items.reduce((s, i) => s + i.quantity, 0),
-    total: payable.reduce((s, i) => s + i.subtotal, 0),
+    total,
+    shippingFee,
+    grandTotal: total + shippingFee,
+    freeShippingThreshold: FREE_SHIPPING_THRESHOLD,
   };
 }
 

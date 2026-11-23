@@ -3,7 +3,7 @@
 電子零件電商的後端服務（商品資料取自 EMMA Collection 露天賣場），採 **Node.js + Express 5 + MongoDB (Mongoose)**，落實 MVC 分層。
 
 - **線上 API Base URL**：https://emma-parts-api.onrender.com/api
-- **前端網站**：https://emma-parts.pages.dev
+- **前端網站**：https://sale.lifemochi.com（備用：https://emma-parts.pages.dev）
 - **Postman Collection**：[`docs/emma-parts-api.postman_collection.json`](docs/emma-parts-api.postman_collection.json)
 - **前端 Repo**：`https://github.com/roklul/hex_individual_project_web`
 
@@ -25,6 +25,8 @@
 | Route | `src/routes/` | 只負責 URL → middleware → controller 對應 |
 | Middleware | `src/middlewares/` | JWT 驗證、管理員授權、輸入驗證、錯誤處理 |
 | Validator | `src/validators/` | Zod schema，統一驗證請求格式 |
+
+訂單：`Order` Model 保存商品快照，`order.controller` 處理結帳、扣庫存與取消。
 
 其他：`helmet`（安全標頭）、`cors`（白名單）、`express-rate-limit`（登入/註冊防暴力破解）、`bcryptjs`（密碼雜湊，cost 12）。
 
@@ -159,3 +161,21 @@ npm test
 | 商品被管理員刪除 | 自動自所有購物車移除 |
 | 商品下架或庫存不足 | 保留於購物車並標示 `available: false`，不計入總額 |
 | JSON 格式錯誤 | `400` |
+
+### 訂單 Orders（需登入）
+| Method | Path | Body | 說明 |
+| --- | --- | --- | --- |
+| POST | `/api/orders` | `{ recipient: { name, phone, address }, paymentMethod, note? }` | 以購物車內容結帳。付款方式：`貨到付款`、`ATM 轉帳` |
+| GET | `/api/orders?page=&limit=` | — | 我的訂單（新到舊） |
+| GET | `/api/orders/:id` | — | 單一訂單（只能看自己的） |
+| POST | `/api/orders/:id/cancel` | — | 取消訂單（待付款、處理中才可取消），歸還庫存 |
+
+管理員：`GET /api/admin/orders` 查看全部訂單、`PATCH /api/admin/orders/:id` `{ status }` 更新狀態（待付款／處理中／已出貨／已完成／已取消）。
+
+#### 結帳規則
+- **金額一律由後端計算**：前端送來的價格、總額、狀態會被拒絕（400），避免竄改金額。
+- **運費**：商品小計未滿 NT$500 收 NT$60，滿額免運（購物車 API 也會回傳 `shippingFee`、`grandTotal`）。
+- **防超賣**：以「庫存 ≥ 購買量」為條件逐項原子扣庫存；任一項失敗會回滾已扣的庫存並回 409。
+- **商品快照**：訂單保存下單當下的名稱、價格與圖片，之後商品改價或刪除不影響歷史訂單。
+- 成立訂單後清空購物車；取消訂單（會員或管理員）會歸還庫存，且不可重複取消。
+- 本專案為作品展示，不串接金流，不會實際收款。

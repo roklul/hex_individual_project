@@ -181,3 +181,92 @@ test('購物車：邊界情況', async () => {
   r = await api('DELETE', `/cart/items/${productId}`, { token: userToken });
   assert.equal(r.status, 404);
 });
+
+test('結帳與訂單', async () => {
+  const recipient = { name: '王小明', phone: '0912345678', address: '台北市中正區重慶南路一段 122 號' };
+  const stockOf = async (id) => (await api('GET', `/products/${id}`)).json.data.stock;
+
+  // 空購物車不能結帳
+  let r = await api('POST', '/orders', { token: userToken, body: { recipient, paymentMethod: '貨到付款' } });
+  assert.equal(r.status, 400);
+
+  await api('POST', '/cart/items', { token: userToken, body: { productId: lowStockId, quantity: 2 } });
+  await api('POST', '/cart/items', { token: userToken, body: { productId, quantity: 1 } });
+  const lowBefore = await stockOf(lowStockId);
+
+  // 欄位驗證
+  for (const body of [
+    { recipient: { ...recipient, phone: '123' }, paymentMethod: '貨到付款' },
+    { recipient: { ...recipient, address: '台北' }, paymentMethod: '貨到付款' },
+    { recipient, paymentMethod: '信用卡' },
+    { recipient, paymentMethod: '貨到付款', status: '已完成' },
+    { recipient, paymentMethod: '貨到付款', total: 1 },
+  ]) {
+    r = await api('POST', '/orders', { token: userToken, body });
+    assert.equal(r.status, 400, JSON.stringify(body));
+  }
+  r = await api('POST', '/orders', { body: { recipient, paymentMethod: '貨到付款' } });
+  assert.equal(r.status, 401);
+
+  // 成立訂單：金額由後端計算、扣庫存、清空購物車
+  r = await api('POST', '/orders', { token: userToken, body: { recipient, paymentMethod: '貨到付款', note: '請小心包裝' } });
+  assert.equal(r.status, 201);
+  const big = r.json.data;
+  assert.match(big.orderNo, /^EM\d{14}$/);
+  assert.equal(big.status, '處理中');
+  assert.equal(big.shippingFee, 0);
+  assert.equal(big.total, big.items.reduce((s, i) => s + i.price * i.quantity, 0));
+  assert.equal(await stockOf(lowStockId), lowBefore - 2);
+  r = await api('GET', '/cart', { token: userToken });
+  assert.equal(r.json.data.items.length, 0);
+
+  // 未滿免運門檻要收運費；ATM 為待付款
+  await api('POST', '/cart/items', { token: userToken, body: { productId, quantity: 1 } });
+  r = await api('GET', '/cart', { token: userToken });
+  assert.equal(r.json.data.shippingFee, 60);
+  r = await api('POST', '/orders', { token: userToken, body: { recipient, paymentMethod: 'ATM 轉帳' } });
+  const small = r.json.data;
+  assert.equal(small.shippingFee, 60);
+  assert.equal(small.total, 140 + 60);
+  assert.equal(small.status, '待付款');
+
+  r = await api('GET', '/orders', { token: userToken });
+  assert.equal(r.json.data.length, 2);
+  assert.equal(r.json.data[0].id, small.id); // 新的在前
+
+  // 其他會員看不到、也取消不了別人的訂單
+  r = await api('POST', '/auth/register', { body: { name: 'Bob', email: 'bob@example.com', password: 'bob12345' } });
+  const bobToken = r.json.data.token;
+  assert.equal((await api('GET', `/orders/${big.id}`, { token: bobToken })).status, 404);
+  assert.equal((await api('POST', `/orders/${big.id}/cancel`, { token: bobToken })).status, 404);
+  assert.equal((await api('GET', `/orders/${big.id}`, { token: userToken })).status, 200);
+
+  // 取消：歸還庫存；不可重複取消
+  const before = await stockOf(lowStockId);
+  r = await api('POST', `/orders/${big.id}/cancel`, { token: userToken });
+  assert.equal(r.json.data.status, '已取消');
+  assert.equal(await stockOf(lowStockId), before + 2);
+  r = await api('POST', `/orders/${big.id}/cancel`, { token: userToken });
+  assert.equal(r.status, 400);
+
+  // 下單前庫存被改掉：擋下且不扣任何庫存
+  await api('POST', '/cart/items', { token: userToken, body: { productId: lowStockId, quantity: 2 } });
+  await api('POST', '/cart/items', { token: userToken, body: { productId, quantity: 1 } });
+  const okStock = await stockOf(productId);
+  await api('PATCH', `/admin/products/${lowStockId}`, { token: adminToken, body: { stock: 1 } });
+  r = await api('POST', '/orders', { token: userToken, body: { recipient, paymentMethod: '貨到付款' } });
+  assert.equal(r.status, 400);
+  assert.match(r.json.message, /庫存僅剩 1/);
+  assert.equal(await stockOf(productId), okStock);
+
+  // 管理員訂單管理
+  assert.equal((await api('GET', '/admin/orders', { token: userToken })).status, 403);
+  r = await api('GET', '/admin/orders', { token: adminToken });
+  assert.equal(r.json.pagination.total, 2);
+  r = await api('PATCH', `/admin/orders/${small.id}`, { token: adminToken, body: { status: '已出貨' } });
+  assert.equal(r.json.data.status, '已出貨');
+  r = await api('POST', `/orders/${small.id}/cancel`, { token: userToken });
+  assert.equal(r.status, 400); // 已出貨不能由會員取消
+  r = await api('PATCH', `/admin/orders/${big.id}`, { token: adminToken, body: { status: '已出貨' } });
+  assert.equal(r.status, 400); // 已取消不能再改
+});
