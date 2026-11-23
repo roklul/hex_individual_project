@@ -2,9 +2,19 @@
 
 電子零件電商的後端服務（商品資料取自 EMMA Collection 露天賣場），採 **Node.js + Express 5 + MongoDB (Mongoose)**，落實 MVC 分層。
 
-- **線上 API Base URL**：`https://<your-api>.onrender.com/api`（部署後填入）
-- **前端網站**：`https://sale.lifemochi.com`（部署後填入）
+- **線上 API Base URL**：https://emma-parts-api.onrender.com/api
+- **前端網站**：https://emma-parts.pages.dev
+- **Postman Collection**：[`docs/emma-parts-api.postman_collection.json`](docs/emma-parts-api.postman_collection.json)
 - **前端 Repo**：`https://github.com/roklul/hex_individual_project_web`
+
+### 測試帳號
+
+| 角色 | Email | 密碼 |
+| --- | --- | --- |
+| 一般會員 | `member@example.com` | `Member2338x` |
+| 管理員 | 寄送作業時另附 | 為避免公開後商品被任意刪改，不寫在 Repo 中 |
+
+> 也可以在網站自行註冊新會員測試。
 
 ## 技術與架構
 
