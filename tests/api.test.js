@@ -197,6 +197,7 @@ test('結帳與訂單', async () => {
   // 欄位驗證
   for (const body of [
     { recipient: { ...recipient, phone: '123' }, paymentMethod: '貨到付款' },
+    { recipient: { ...recipient, phone: '09212345678' }, paymentMethod: '貨到付款' }, // 11 碼手機不能被當成市話
     { recipient: { ...recipient, address: '台北' }, paymentMethod: '貨到付款' },
     { recipient, paymentMethod: '信用卡' },
     { recipient, paymentMethod: '貨到付款', status: '已完成' },

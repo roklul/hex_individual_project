@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { PAYMENT_METHODS, ORDER_STATUS } from '../models/Order.js';
+import { isValidTwPhone } from '../utils/phone.js';
 
 export const createOrderSchema = z
   .object({
@@ -9,7 +10,7 @@ export const createOrderSchema = z
         phone: z
           .string()
           .trim()
-          .regex(/^(09\d{8}|0\d{1,2}-?\d{6,8})$/, '請輸入有效的電話（手機 09xxxxxxxx 或市話）'),
+          .refine(isValidTwPhone, '請輸入有效的電話（手機 09 開頭 10 碼，或市話如 02-12345678）'),
         address: z.string().trim().min(5, '請輸入完整的收件地址').max(200, '地址最多 200 字'),
       })
       .strict(),
