@@ -21,11 +21,13 @@ export const createOrderSchema = z
   .strict();
 
 export const listOrdersQuerySchema = z.object({
-  page: z.coerce.number().int().min(1).default(1),
-  limit: z.coerce.number().int().min(1).max(50).default(10),
+  page: z.coerce.number({ error: '頁碼需為數字' }).int('頁碼需為整數').min(1, '頁碼至少為 1').default(1),
+  limit: z.coerce.number({ error: '每頁筆數需為數字' }).int('每頁筆數需為整數').min(1, '每頁至少 1 筆').max(50, '每頁最多 50 筆').default(10),
 });
 
-export const updateStatusSchema = z.object({ status: z.enum(ORDER_STATUS) }).strict();
+export const updateStatusSchema = z
+  .object({ status: z.enum(ORDER_STATUS, { error: `狀態需為：${ORDER_STATUS.join('、')}` }) })
+  .strict();
 
 export const transferReportSchema = z
   .object({ last5: z.string().trim().regex(/^\d{5}$/, '請輸入 5 位數字的匯款帳號末五碼') })
