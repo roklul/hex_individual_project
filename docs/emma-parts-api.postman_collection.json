@@ -1199,6 +1199,49 @@
           }
         },
         {
+          "name": "回報 ATM 匯款末五碼",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"last5\": \"12345\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}/transfer-report",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{orderId}}",
+                "transfer-report"
+              ]
+            },
+            "description": "僅限自己的「ATM 轉帳」訂單、且狀態為「待付款」時可回報；確認入帳前可重新回報修正。last5 需為 5 位數字。貨到付款訂單或已確認入帳的訂單回 400。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
           "name": "取消訂單",
           "request": {
             "method": "POST",
@@ -1290,7 +1333,7 @@
                 "{{orderId}}"
               ]
             },
-            "description": "status：待付款、處理中、已出貨、已完成、已取消。改為已取消會歸還庫存；已取消的訂單無法再變更。",
+            "description": "狀態只能往前推進：待付款→處理中（確認入帳）→已出貨→已完成；待付款、處理中可改為已取消（會歸還庫存）。已完成與已取消為終點，不合規則的變更回 400。ATM 訂單可在「全部訂單」的 transferReport 看到買家回報的末五碼。",
             "auth": {
               "type": "bearer",
               "bearer": [

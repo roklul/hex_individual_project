@@ -1,8 +1,9 @@
 import crypto from 'node:crypto';
-import { Order, CANCELLABLE_STATUS } from '../models/Order.js';
+import { Order, CANCELLABLE_STATUS, statusesLeadingTo } from '../models/Order.js';
 import { Cart } from '../models/Cart.js';
 import { Product } from '../models/Product.js';
 import { calcShipping } from '../config/shipping.js';
+import { ATM_ACCOUNT, PAYMENT_DEADLINE_DAYS } from '../config/payment.js';
 import { AppError } from '../utils/AppError.js';
 import { cartQuote } from './cart.controller.js';
 
@@ -13,7 +14,12 @@ function makeOrderNo() {
 
 const toDTO = (o) => {
   const { _id, __v, ...rest } = o.toObject ? o.toObject() : o;
-  return { id: _id, ...rest };
+  const dto = { id: _id, ...rest };
+  if (dto.paymentMethod === 'ATM 轉帳') {
+    dto.atmAccount = ATM_ACCOUNT;
+    dto.paymentDeadline = new Date(new Date(dto.createdAt).getTime() + PAYMENT_DEADLINE_DAYS * 86_400_000);
+  }
+  return dto;
 };
 
 export async function createOrder(req, res) {
@@ -107,18 +113,37 @@ export async function cancelMyOrder(req, res) {
   res.json({ success: true, message: '訂單已取消', data: toDTO(updated) });
 }
 
-async function changeOrderStatus(filter, status, allowedStatuses) {
+export async function reportTransfer(req, res) {
+  const { last5 } = req.validated.body;
+  const filter = { _id: req.params.id, user: req.user._id };
+  // 只有自己的 ATM 訂單、且仍在待付款時可以回報；確認入帳前可重新回報修正
+  const order = await Order.findOneAndUpdate(
+    { ...filter, paymentMethod: 'ATM 轉帳', status: '待付款' },
+    { $set: { transferReport: { last5, reportedAt: new Date() } } },
+    { returnDocument: 'after', runValidators: true },
+  );
+  if (!order) {
+    const current = await Order.findOne(filter).select('status paymentMethod');
+    if (!current) throw new AppError(404, '找不到此訂單');
+    if (current.paymentMethod !== 'ATM 轉帳') throw new AppError(400, '此訂單不是 ATM 轉帳，不需要回報匯款');
+    throw new AppError(400, `訂單狀態為「${current.status}」，不需要回報匯款`);
+  }
+  res.json({ success: true, message: '已收到匯款回報，確認入帳後會盡快出貨', data: toDTO(order) });
+}
+
+async function changeOrderStatus(filter, status, allowedStatuses = statusesLeadingTo(status)) {
   return Order.db.transaction(async (session) => {
     const cancelling = status === '已取消';
     const updated = await Order.findOneAndUpdate(
-      { ...filter, status: allowedStatuses ? { $in: allowedStatuses } : { $ne: '已取消' } },
+      { ...filter, status: { $in: allowedStatuses } },
       { $set: cancelling ? { status, cancelledAt: new Date() } : { status } },
       { returnDocument: 'after', session },
     );
     if (!updated) {
       const current = await Order.findOne(filter).select('status').session(session);
       if (!current) throw new AppError(404, '找不到此訂單');
-      throw new AppError(400, allowedStatuses ? `訂單狀態為「${current.status}」，無法取消` : '已取消的訂單無法變更狀態');
+      if (current.status === status) throw new AppError(400, `訂單已經是「${status}」`);
+      throw new AppError(400, `訂單狀態為「${current.status}」，無法${cancelling ? '取消' : `改為「${status}」`}`);
     }
     if (cancelling) {
       for (const { product, quantity } of updated.items) {

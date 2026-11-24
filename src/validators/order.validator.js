@@ -26,3 +26,7 @@ export const listOrdersQuerySchema = z.object({
 });
 
 export const updateStatusSchema = z.object({ status: z.enum(ORDER_STATUS) }).strict();
+
+export const transferReportSchema = z
+  .object({ last5: z.string().trim().regex(/^\d{5}$/, '請輸入 5 位數字的匯款帳號末五碼') })
+  .strict();

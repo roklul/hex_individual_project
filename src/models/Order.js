@@ -2,7 +2,18 @@ import mongoose from 'mongoose';
 
 export const PAYMENT_METHODS = Object.freeze(['貨到付款', 'ATM 轉帳']);
 export const ORDER_STATUS = Object.freeze(['待付款', '處理中', '已出貨', '已完成', '已取消']);
-export const CANCELLABLE_STATUS = Object.freeze(['待付款', '處理中']);
+// 訂單狀態只能往前推進；取消只能在出貨前，已完成與已取消為終點
+export const ORDER_STATUS_TRANSITIONS = Object.freeze({
+  待付款: Object.freeze(['處理中', '已取消']),
+  處理中: Object.freeze(['已出貨', '已取消']),
+  已出貨: Object.freeze(['已完成']),
+  已完成: Object.freeze([]),
+  已取消: Object.freeze([]),
+});
+/** 可以轉換成 status 的來源狀態 */
+export const statusesLeadingTo = (status) =>
+  ORDER_STATUS.filter((from) => ORDER_STATUS_TRANSITIONS[from].includes(status));
+export const CANCELLABLE_STATUS = Object.freeze(statusesLeadingTo('已取消'));
 
 // 下單當下的商品快照：之後商品改價、改名或刪除都不影響歷史訂單
 const orderItemSchema = new mongoose.Schema(
@@ -36,6 +47,11 @@ const orderSchema = new mongoose.Schema(
     total: { type: Number, required: true, min: 0 },
     status: { type: String, enum: ORDER_STATUS, default: '處理中' },
     cancelledAt: Date,
+    // ATM 轉帳：買家回報的匯款帳號末五碼，供管理員對帳
+    transferReport: {
+      last5: { type: String, match: /^\d{5}$/ },
+      reportedAt: Date,
+    },
   },
   { timestamps: true },
 );

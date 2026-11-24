@@ -169,9 +169,19 @@ npm test
 | POST | `/api/orders` | `{ quoteVersion, recipient: { name, phone, address }, paymentMethod, note? }` | 以購物車內容結帳。`quoteVersion` 取自購物車 API 回應；付款方式：`貨到付款`、`ATM 轉帳` |
 | GET | `/api/orders?page=&limit=` | — | 我的訂單（新到舊） |
 | GET | `/api/orders/:id` | — | 單一訂單（只能看自己的） |
+| POST | `/api/orders/:id/transfer-report` | `{ last5 }` | ATM 訂單回報匯款帳號末五碼（待付款時才可回報，確認入帳前可修正） |
 | POST | `/api/orders/:id/cancel` | — | 取消訂單（待付款、處理中才可取消），歸還庫存 |
 
-管理員：`GET /api/admin/orders` 查看全部訂單、`PATCH /api/admin/orders/:id` `{ status }` 更新狀態（待付款／處理中／已出貨／已完成／已取消）。
+管理員：`GET /api/admin/orders` 查看全部訂單（含 ATM 匯款回報 `transferReport`）、`PATCH /api/admin/orders/:id` `{ status }` 更新狀態。
+
+狀態只能往前推進，不合規則的變更回 400：
+
+| 目前狀態 | 可改為 |
+| --- | --- |
+| 待付款 | 處理中（確認入帳）、已取消 |
+| 處理中 | 已出貨、已取消 |
+| 已出貨 | 已完成 |
+| 已完成、已取消 | —（終點） |
 
 #### 結帳規則
 - **報價版本確認**：購物車 API 每次回傳 `quoteVersion`（由購物車版本、商品價格、數量與運費計算）。下單時必須帶回買家最後看到的版本；若期間商品調價或購物車在其他分頁被修改，後端回 409，前端會顯示最新明細並請買家再次確認。同一份報價只能成立一張訂單。
@@ -180,4 +190,5 @@ npm test
 - **結帳交易**會一起完成扣庫存、建立訂單及清空購物車。寫入中斷會回滾整筆交易，同一份購物車同時送出也只會成立一張訂單。自架 MongoDB 需啟用 replica set，或使用支援交易的分片叢集。 `npm run dev:memory` 會自動啟動單節點 replica set。
 - **商品快照**：訂單保存下單當下的名稱、價格與圖片，之後商品改價或刪除不影響歷史訂單。
 - 會員與管理員取消訂單時，狀態更新和庫存回補會在同一筆交易提交。即使兩人同時取消，庫存也只回補一次。
+- **ATM 轉帳對帳**：ATM 訂單的回應附上收款帳號 `atmAccount` 與付款期限 `paymentDeadline`（下單後 3 天）。買家轉帳後回報帳號末五碼，管理員在後台對照銀行入帳紀錄後，把訂單改為「處理中」。收款帳號由環境變數 `ATM_BANK_CODE`、`ATM_BANK_NAME`、`ATM_ACCOUNT`、`ATM_ACCOUNT_NAME` 設定，未設定時顯示標明「展示用」的假帳號。
 - 本專案為作品展示，不串接金流，不會實際收款。

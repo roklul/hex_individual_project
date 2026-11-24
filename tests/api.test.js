@@ -282,10 +282,42 @@ test('結帳與訂單', async () => {
   assert.equal((await api('GET', '/admin/orders', { token: userToken })).status, 403);
   r = await api('GET', '/admin/orders', { token: adminToken });
   assert.equal(r.json.pagination.total, 2);
+  // ATM 訂單附上收款帳號與付款期限；會員回報匯款末五碼
+  assert.equal(small.atmAccount.demo, true);
+  assert.ok(small.paymentDeadline);
+  assert.equal(big.atmAccount, undefined);
+  r = await api('POST', `/orders/${small.id}/transfer-report`, { token: userToken, body: { last5: '1234' } });
+  assert.equal(r.status, 400);
+  r = await api('POST', `/orders/${small.id}/transfer-report`, { token: bobToken, body: { last5: '12345' } });
+  assert.equal(r.status, 404);
+  r = await api('POST', `/orders/${big.id}/transfer-report`, { token: userToken, body: { last5: '12345' } });
+  assert.equal(r.status, 400); // 不是 ATM 訂單
+  r = await api('POST', `/orders/${small.id}/transfer-report`, { token: userToken, body: { last5: '12345' } });
+  assert.equal(r.status, 200);
+  r = await api('POST', `/orders/${small.id}/transfer-report`, { token: userToken, body: { last5: '54321' } });
+  assert.equal(r.json.data.transferReport.last5, '54321'); // 確認入帳前可以修正
+  r = await api('GET', '/admin/orders', { token: adminToken });
+  assert.equal(r.json.data.find((o) => o.id === small.id).transferReport.last5, '54321');
+
+  // 狀態只能往前推進
+  r = await api('PATCH', `/admin/orders/${small.id}`, { token: adminToken, body: { status: '已出貨' } });
+  assert.equal(r.status, 400); // 待付款不能跳過確認入帳直接出貨
+  r = await api('PATCH', `/admin/orders/${small.id}`, { token: adminToken, body: { status: '處理中' } });
+  assert.equal(r.json.data.status, '處理中');
+  r = await api('POST', `/orders/${small.id}/transfer-report`, { token: userToken, body: { last5: '11111' } });
+  assert.equal(r.status, 400); // 已確認入帳後不能再回報
   r = await api('PATCH', `/admin/orders/${small.id}`, { token: adminToken, body: { status: '已出貨' } });
   assert.equal(r.json.data.status, '已出貨');
+  r = await api('PATCH', `/admin/orders/${small.id}`, { token: adminToken, body: { status: '待付款' } });
+  assert.equal(r.status, 400); // 不能倒退
   r = await api('POST', `/orders/${small.id}/cancel`, { token: userToken });
   assert.equal(r.status, 400); // 已出貨不能由會員取消
+  r = await api('PATCH', `/admin/orders/${small.id}`, { token: adminToken, body: { status: '已取消' } });
+  assert.equal(r.status, 400); // 出貨後不能取消
+  r = await api('PATCH', `/admin/orders/${small.id}`, { token: adminToken, body: { status: '已完成' } });
+  assert.equal(r.json.data.status, '已完成');
+  r = await api('PATCH', `/admin/orders/${small.id}`, { token: adminToken, body: { status: '處理中' } });
+  assert.equal(r.status, 400); // 已完成為終點
   r = await api('PATCH', `/admin/orders/${big.id}`, { token: adminToken, body: { status: '已出貨' } });
   assert.equal(r.status, 400); // 已取消不能再改
 });
