@@ -17,6 +17,12 @@ const userSchema = new mongoose.Schema(
     password: { type: String, required: true, select: false },
     role: { type: String, enum: Object.values(ROLES), default: ROLES.USER },
     sessionVersion: { type: Number, default: 0 },
+    // 忘記密碼：只保存 token 的 SHA-256 雜湊，資料庫外洩也無法直接拿來重設
+    passwordReset: {
+      tokenHash: { type: String, select: false },
+      expiresAt: { type: Date, select: false },
+      requestedAt: { type: Date, select: false },
+    },
   },
   { timestamps: true },
 );

@@ -60,6 +60,10 @@ npm test
 | `JWT_EXPIRES_IN` | Token 有效期，預設 `7d` |
 | `CORS_ORIGIN` | 允許的前端網址，多個以逗號分隔 |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` / `ADMIN_NAME` | 僅供 `create-admin` 腳本使用 |
+| `RESEND_API_KEY` | [Resend](https://resend.com) 寄信 API 金鑰，用於寄送重設密碼信。未設定時不寄信（本機開發會把信件內容印在終端機） |
+| `MAIL_FROM` | 寄件者，例如 `EMMA 電子零件 <noreply@你的網域>`。網域需先在 Resend 驗證；未設定時使用 Resend 測試寄件者（只能寄給 Resend 帳號本人的信箱） |
+| `APP_URL` | 重設密碼信中連結的前端網址，未設定時取 `CORS_ORIGIN` 中第一個 https 網址 |
+| `ATM_BANK_CODE` / `ATM_BANK_NAME` / `ATM_ACCOUNT` / `ATM_ACCOUNT_NAME` | ATM 轉帳收款帳號（選填），未設定時顯示「展示用」假帳號 |
 
 ## 管理員帳號產生方式
 
@@ -94,6 +98,9 @@ npm test
 | POST | `/api/auth/register` | 公開 | `{ name, email, password }` | 註冊並回傳 token。密碼 8–72 碼、需含英文與數字 |
 | POST | `/api/auth/login` | 公開 | `{ email, password }` | 登入並回傳 token |
 | GET | `/api/auth/me` | 會員 | — | 取得目前登入者資料 |
+| POST | `/api/auth/forgot-password` | 公開 | `{ email }` | 寄送重設密碼連結。不論 Email 是否註冊都回相同訊息；同一帳號 60 秒內只寄一次，每個 IP 15 分鐘最多 5 次 |
+| POST | `/api/auth/reset-password` | 公開 | `{ token, password }` | 用信中的 token 設定新密碼（30 分鐘內有效、只能用一次），成功後自動登入並撤銷所有舊 token |
+| PATCH | `/api/auth/password` | 會員 | `{ currentPassword, newPassword }` | 修改密碼，需驗證目前密碼；回傳新 token，其他裝置的舊 token 全部失效 |
 
 ### 商品 Products（公開）
 | Method | Path | 說明 |
