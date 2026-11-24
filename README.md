@@ -73,7 +73,7 @@ npm test
    ```
    Email 已存在時，腳本會在同一次資料庫更新中提升權限、重設密碼並撤銷該會員的所有舊 JWT。首次建立帳號時會直接授予管理員角色。
 
-> 審核用管理員帳密會另外提供，不寫在 Repo 中。
+> 審核用管理員帳密會另外提供，不寫在 Repo 中。管理員登入前台後，導覽列會出現「後台管理」，可直接在網頁上管理商品與訂單。
 
 ## API 文件
 
@@ -107,7 +107,7 @@ npm test
 ### 商品管理 Admin（需管理員）
 | Method | Path | 說明 |
 | --- | --- | --- |
-| GET | `/api/admin/products?page=&limit=` | 全部商品（含未上架） |
+| GET | `/api/admin/products?page=&limit=&category=&keyword=` | 全部商品（含未上架），可依分類與關鍵字篩選 |
 | POST | `/api/admin/products` | 新增商品 |
 | PATCH | `/api/admin/products/:id` | 部分更新商品 |
 | DELETE | `/api/admin/products/:id` | 刪除商品（同步自所有購物車移除） |

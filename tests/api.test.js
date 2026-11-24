@@ -135,8 +135,15 @@ test('管理員權限', async () => {
   assert.equal(r.status, 201);
   const id = r.json.data.id;
 
-  r = await api('PATCH', `/admin/products/${id}`, { token: adminToken, body: { price: 200 } });
+  r = await api('PATCH', `/admin/products/${id}`, { token: adminToken, body: { price: 200, isEnabled: false } });
   assert.equal(r.json.data.price, 200);
+
+  // 後台列表可搜尋關鍵字，且包含已下架商品
+  r = await api('GET', '/admin/products?keyword=測試商品', { token: adminToken });
+  assert.deepEqual(r.json.data.map((p) => p.id), [id]);
+  r = await api('GET', '/products?keyword=測試商品');
+  assert.equal(r.json.data.length, 0);
+  await api('PATCH', `/admin/products/${id}`, { token: adminToken, body: { isEnabled: true } });
 
   // 加入購物車後刪除商品，購物車應同步移除
   await api('POST', '/cart/items', { token: userToken, body: { productId: id, quantity: 1 } });

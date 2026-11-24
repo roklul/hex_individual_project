@@ -9,14 +9,19 @@ const SORTS = {
   price_desc: { price: -1, _id: -1 },
 };
 
-export async function listProducts(req, res) {
-  const { page, limit, category, keyword, sort } = req.validated.query;
-  const filter = { isEnabled: true };
+function buildFilter({ category, keyword }, base = {}) {
+  const filter = { ...base };
   if (category) filter.category = category;
   if (keyword) {
     const re = new RegExp(escapeRegex(keyword), 'i');
     filter.$or = [{ title: re }, { brand: re }, { description: re }];
   }
+  return filter;
+}
+
+export async function listProducts(req, res) {
+  const { page, limit, sort } = req.validated.query;
+  const filter = buildFilter(req.validated.query, { isEnabled: true });
 
   const [total, products] = await Promise.all([
     Product.countDocuments(filter),
@@ -50,9 +55,10 @@ export async function getProduct(req, res) {
 
 export async function adminListProducts(req, res) {
   const { page, limit } = req.validated.query;
+  const filter = buildFilter(req.validated.query);
   const [total, products] = await Promise.all([
-    Product.countDocuments(),
-    Product.find().sort(SORTS.newest).skip((page - 1) * limit).limit(limit).lean(),
+    Product.countDocuments(filter),
+    Product.find(filter).sort(SORTS.newest).skip((page - 1) * limit).limit(limit).lean(),
   ]);
   res.json({
     success: true,
