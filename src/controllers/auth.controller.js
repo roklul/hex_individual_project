@@ -115,7 +115,8 @@ export async function changePassword(req, res) {
     throw new AppError(400, '目前的密碼不正確', [{ field: 'currentPassword', message: '目前的密碼不正確' }]);
   }
   const updated = await User.findOneAndUpdate(
-    { _id: user._id, sessionVersion: user.sessionVersion },
+    // 舊資料可能沒有 sessionVersion 欄位（讀取時才補預設 0），版本 0 也要能比對到缺欄位的文件
+    { _id: user._id, sessionVersion: user.sessionVersion === 0 ? { $in: [0, null] } : user.sessionVersion },
     { $set: { password: await hashPassword(newPassword) }, $unset: { passwordReset: 1 }, $inc: { sessionVersion: 1 } },
     { returnDocument: 'after' },
   );

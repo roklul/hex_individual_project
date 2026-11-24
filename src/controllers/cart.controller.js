@@ -22,9 +22,34 @@ async function getCart(userId) {
   }
   if (cart.__v === undefined) {
     await Cart.updateOne({ ...filter, __v: { $exists: false } }, { $set: { __v: 0 } }, { timestamps: false });
-    return Cart.findOne(filter);
+    cart = await Cart.findOne(filter);
+  }
+  if (mergeDuplicateItems(cart)) {
+    try {
+      await cart.save({ timestamps: false });
+    } catch (err) {
+      if (err.name !== 'VersionError') throw err;
+      return getCart(userId);
+    }
   }
   return cart;
+}
+
+/**
+ * 舊資料可能因並行寫入出現同商品多列：依商品 ID 合併成一列（數量相加、不超過單品上限），
+ * 之後的加購上限、顯示與結帳都以合併後的總數計算。回傳是否有變更。
+ */
+function mergeDuplicateItems(cart) {
+  const byProduct = new Map();
+  for (const item of cart.items) {
+    const key = item.product.toString();
+    const first = byProduct.get(key);
+    if (first) first.quantity = Math.min(first.quantity + item.quantity, MAX_QTY_PER_ITEM);
+    else byProduct.set(key, { product: item.product, quantity: item.quantity, addedAt: item.addedAt });
+  }
+  if (byProduct.size === cart.items.length) return false;
+  cart.items = [...byProduct.values()];
+  return true;
 }
 
 async function buildCartResponse(cart) {

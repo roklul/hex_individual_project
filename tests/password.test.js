@@ -1,6 +1,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
+import { createHash, randomBytes } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import mongoose from 'mongoose';
 import { MongoMemoryServer } from 'mongodb-memory-server';
@@ -124,4 +125,35 @@ test('修改密碼：需驗證目前密碼，成功後換發新憑證並登出�
   assert.equal((await call('GET', '/me', null, deviceA)).status, 401);
   assert.equal((await call('GET', '/me', null, deviceB)).status, 401);
   assert.equal((await call('POST', '/login', { email, password: 'NewPass123' })).status, 200);
+});
+
+test('升為管理員後，先前寄出的重設連結一併作廢', async () => {
+  const email = 'promote@example.test';
+  await call('POST', '/register', { name: '升權', email, password: 'OldPass123' });
+  // 忘記密碼 API 已被前一個測試用到頻率上限，直接寫入一組有效的重設連結
+  const token = randomBytes(32).toString('base64url');
+  await User.updateOne({ email }, { $set: { passwordReset: {
+    tokenHash: createHash('sha256').update(token).digest('hex'),
+    expiresAt: new Date(Date.now() + 600_000), requestedAt: new Date(),
+  } } });
+
+  const { upsertAdmin } = await import('../scripts/create-admin.js');
+  await upsertAdmin({ email, password: 'AdminPass123' });
+
+  const stored = await User.findOne({ email }).select('+passwordReset.tokenHash').lean();
+  assert.equal(stored.passwordReset?.tokenHash, undefined);
+  assert.equal((await call('POST', '/reset-password', { token, password: 'Hijack123' })).status, 400);
+  assert.equal((await call('POST', '/login', { email, password: 'AdminPass123' })).status, 200);
+});
+
+test('舊資料沒有 sessionVersion 欄位的會員也能修改密碼', async () => {
+  const email = 'legacy@example.test';
+  await call('POST', '/register', { name: '舊會員', email, password: 'OldPass123' });
+  await User.collection.updateOne({ email }, { $unset: { sessionVersion: '' } });
+  const token = (await call('POST', '/login', { email, password: 'OldPass123' })).json.data.token;
+
+  const r = await call('PATCH', '/password', { currentPassword: 'OldPass123', newPassword: 'NewPass123' }, token);
+  assert.equal(r.status, 200);
+  assert.equal((await call('GET', '/me', null, token)).status, 401);
+  assert.equal((await call('GET', '/me', null, r.json.data.token)).status, 200);
 });

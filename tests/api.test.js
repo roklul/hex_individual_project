@@ -450,3 +450,26 @@ test('取消訂單若中途回補失敗可重試，會員與管理員同時取�
   assert.ok(responses.some((r) => [400, 409].includes(r.status)));
   assert.deepEqual(await storedState(), { statuses: ['已取消'], quantities: [], stocks: [5, 5] });
 });
+
+test('舊購物車的重複品項會合併，加購上限以合併後的總數計算', async () => {
+  const r = await api('POST', '/auth/register', { body: { name: 'Dup', email: 'dup-rows@example.test', password: 'CartTest123' } });
+  const { token, user } = r.json.data;
+  const product = await mongoose.models.Product.create({
+    title: '重複列測試', category: '模組・配件', price: 50, stock: 5, imageUrl: 'https://example.com/dup.jpg',
+  });
+  await mongoose.models.Cart.collection.insertOne({
+    user: new mongoose.Types.ObjectId(user.id),
+    items: [{ product: product._id, quantity: 2 }, { product: product._id, quantity: 2 }],
+    __v: 0,
+  });
+
+  const over = await api('POST', '/cart/items', { token, body: { productId: product.id, quantity: 2 } });
+  assert.equal(over.status, 400);
+  assert.match(over.json.message, /最多還能加入 1/);
+  const ok = await api('POST', '/cart/items', { token, body: { productId: product.id, quantity: 1 } });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.json.data.items.length, 1);
+  assert.equal(ok.json.data.items[0].quantity, 5);
+  const raw = await mongoose.models.Cart.collection.findOne({ user: new mongoose.Types.ObjectId(user.id) });
+  assert.equal(raw.items.length, 1);
+});

@@ -13,7 +13,8 @@ export async function upsertAdmin({ email, password, name = 'Admin' }) {
 
   const user = await User.findOneAndUpdate(
     { email: normalizedEmail },
-    { $set: { role: ROLES.ADMIN, password: await hashPassword(password), name }, $inc: { sessionVersion: 1 } },
+    // 同時作廢舊的登入憑證與尚未使用的重設密碼連結，避免升權前寄出的連結改寫管理員密碼
+    { $set: { role: ROLES.ADMIN, password: await hashPassword(password), name }, $unset: { passwordReset: 1 }, $inc: { sessionVersion: 1 } },
     { upsert: true, returnDocument: 'after', runValidators: true },
   );
   console.log(`[admin] 管理員已就緒：${user.email}`);

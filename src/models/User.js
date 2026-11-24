@@ -30,6 +30,8 @@ const userSchema = new mongoose.Schema(
 userSchema.pre('save', async function updateCredentials() {
   if (!this.isNew && (this.isModified('password') || this.isModified('role'))) {
     this.$inc('sessionVersion', 1);
+    // 密碼或角色變更後，先前寄出的重設密碼連結一併作廢
+    this.passwordReset = undefined;
   }
   if (this.isModified('password')) this.password = await hashPassword(this.password);
 });
